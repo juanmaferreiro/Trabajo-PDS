@@ -470,7 +470,6 @@ class NotificadorArea implements Observer {
 // ========================================
 
 
-
 class PedidoCompra {
     private static int contadorPedidos = 1;
 
@@ -515,9 +514,6 @@ class PedidoCompra {
 
         agregarHistorial("Pedido creado");
         registrarCambioEstado("", "Ventas", "Pedido inicial creado");
-    }
-
-    public PedidoCompra(Cliente clienteIncompleto, Auto autoValido, FormaPago pagoValido, Vendedor vendedorValido) {
     }
 
     private void configurarCalculadoraImpuestos() {
@@ -618,12 +614,14 @@ abstract class ValidadorPedido {
     }
 
     public void validar(PedidoCompra pedido) throws ProcessingException {
-        if (validarEspecifico(pedido)) {
-            if (siguiente != null) {
-                siguiente.validar(pedido);
-            }
-        } else {
+        // Primero valida este validador específico
+        if (!validarEspecifico(pedido)) {
             throw new ProcessingException(getMensajeError());
+        }
+
+        // Si pasa la validación y hay siguiente validador, continúa la cadena
+        if (siguiente != null) {
+            siguiente.validar(pedido);
         }
     }
 
@@ -637,12 +635,14 @@ class ValidadorCliente extends ValidadorPedido {
         Cliente cliente = pedido.getCliente();
         return cliente != null &&
                 cliente.getNombre() != null && !cliente.getNombre().trim().isEmpty() &&
-                cliente.getDocumento() != null && !cliente.getDocumento().trim().isEmpty();
+                cliente.getApellido() != null && !cliente.getApellido().trim().isEmpty() &&
+                cliente.getDocumento() != null && !cliente.getDocumento().trim().isEmpty() &&
+                cliente.getEmail() != null && !cliente.getEmail().trim().isEmpty();
     }
 
     @Override
     protected String getMensajeError() {
-        return "Datos del cliente incompletos";
+        return "Datos del cliente incompletos: se requiere nombre, apellido, documento y email";
     }
 }
 
@@ -651,25 +651,61 @@ class ValidadorVehiculo extends ValidadorPedido {
     protected boolean validarEspecifico(PedidoCompra pedido) {
         Vehiculo vehiculo = pedido.getVehiculo();
         return vehiculo != null &&
+                vehiculo.getMarca() != null && !vehiculo.getMarca().trim().isEmpty() &&
+                vehiculo.getModelo() != null && !vehiculo.getModelo().trim().isEmpty() &&
                 vehiculo.getNumeroChasis() != null && !vehiculo.getNumeroChasis().trim().isEmpty() &&
-                vehiculo.getNumeroMotor() != null && !vehiculo.getNumeroMotor().trim().isEmpty();
+                vehiculo.getNumeroMotor() != null && !vehiculo.getNumeroMotor().trim().isEmpty() &&
+                vehiculo.getPrecioBase() > 0;
     }
 
     @Override
     protected String getMensajeError() {
-        return "Datos del vehículo incompletos";
+        return "Datos del vehículo incompletos: se requiere marca, modelo, número de chasis, número de motor y precio válido";
     }
 }
 
 class ValidadorFormaPago extends ValidadorPedido {
     @Override
     protected boolean validarEspecifico(PedidoCompra pedido) {
-        return pedido.getFormaPago() != null;
+        FormaPago formaPago = pedido.getFormaPago();
+        return formaPago != null &&
+                formaPago.getTipo() != null &&
+                !formaPago.getTipo().trim().isEmpty();
     }
 
     @Override
     protected String getMensajeError() {
-        return "Forma de pago no especificada";
+        return "Forma de pago no especificada o inválida";
+    }
+}
+
+class ValidadorVendedor extends ValidadorPedido {
+    @Override
+    protected boolean validarEspecifico(PedidoCompra pedido) {
+        Vendedor vendedor = pedido.getVendedor();
+        return vendedor != null &&
+                vendedor.getNombre() != null && !vendedor.getNombre().trim().isEmpty() &&
+                vendedor.getEmail() != null && !vendedor.getEmail().trim().isEmpty();
+    }
+
+    @Override
+    protected String getMensajeError() {
+        return "Datos del vendedor incompletos: se requiere nombre y email válidos";
+    }
+}
+
+class ValidadorDatosFacturacion extends ValidadorPedido {
+    @Override
+    protected boolean validarEspecifico(PedidoCompra pedido) {
+        DatosFacturacion facturacion = pedido.getDatosFacturacion();
+        return facturacion != null &&
+                facturacion.getNombreRazonSocial() != null && !facturacion.getNombreRazonSocial().trim().isEmpty() &&
+                facturacion.getDireccion() != null && !facturacion.getDireccion().trim().isEmpty();
+    }
+
+    @Override
+    protected String getMensajeError() {
+        return "Datos de facturación incompletos: se requiere nombre/razón social y dirección";
     }
 }
 
@@ -696,14 +732,23 @@ class ConcesionariaFacade {
     }
 
     private void configurarValidadores() {
+        // Crear todos los validadores
         ValidadorCliente validadorCliente = new ValidadorCliente();
         ValidadorVehiculo validadorVehiculo = new ValidadorVehiculo();
         ValidadorFormaPago validadorFormaPago = new ValidadorFormaPago();
+        ValidadorVendedor validadorVendedor = new ValidadorVendedor();
+        ValidadorDatosFacturacion validadorFacturacion = new ValidadorDatosFacturacion();
 
+        // Configurar la cadena de responsabilidad
         validadorCliente.setSiguiente(validadorVehiculo);
         validadorVehiculo.setSiguiente(validadorFormaPago);
+        validadorFormaPago.setSiguiente(validadorVendedor);
+        validadorVendedor.setSiguiente(validadorFacturacion);
 
+        // El primer validador de la cadena
         this.cadenaValidacion = validadorCliente;
+
+        System.out.println("✓ Cadena de validaciones configurada: Cliente → Vehículo → FormaPago → Vendedor → Facturación");
     }
 
     private void inicializarDatos() {
@@ -1106,6 +1151,7 @@ class ConcesionariaFacade {
 // ========================================
 // MENÚ PRINCIPAL
 // ========================================
+
 
 
 class MenuPrincipal {
@@ -1649,7 +1695,7 @@ class MenuPrincipal {
 }
 
 // ========================================
-// CLASE DE TESTS r
+// CLASE DE TESTS
 // ========================================
 
 class TestConcesionaria {
@@ -1805,16 +1851,50 @@ class TestConcesionaria {
     private void testChainOfResponsibility() {
         System.out.println("\n[TEST] Chain of Responsibility - Validaciones");
 
+        // Test 1: Pedido con cliente incompleto
         try {
-            // Crear un pedido con datos incompletos para probar las validaciones
-            Cliente clienteIncompleto = new Cliente("", "Gomez", "24454656767", "asdsad", "1232434");
+            Cliente clienteIncompleto = new Cliente("", "", "", "", "");
             Auto autoValido = new Auto("Test", "Test", "Test", "CHTEST", "MTTEST", 1000);
+            ConfiguracionAdicional configValida = new ConfiguracionAdicional("", "", "", 0);
             FormaPago pagoValido = new PagoContado();
-            Vendedor vendedorValido = new Vendedor("Test", "test@test.com");
+            Vendedor vendedorValido = new Vendedor("Test Vendedor", "test@test.com");
+            DatosFacturacion facturacionValida = new DatosFacturacion("Test Cliente", "Test Dirección", "");
 
-            PedidoCompra pedidoInvalido = new PedidoCompra(clienteIncompleto, autoValido, pagoValido, vendedorValido);
+            PedidoCompra pedidoInvalido = new PedidoCompra(clienteIncompleto, autoValido, configValida, pagoValido, vendedorValido, facturacionValida);
 
-            // Configurar cadena de validación
+            // Configurar cadena de validación manualmente para el test
+            ValidadorCliente validadorCliente = new ValidadorCliente();
+            ValidadorVehiculo validadorVehiculo = new ValidadorVehiculo();
+            ValidadorFormaPago validadorFormaPago = new ValidadorFormaPago();
+            ValidadorVendedor validadorVendedor = new ValidadorVendedor();
+            ValidadorDatosFacturacion validadorFacturacion = new ValidadorDatosFacturacion();
+
+            validadorCliente.setSiguiente(validadorVehiculo);
+            validadorVehiculo.setSiguiente(validadorFormaPago);
+            validadorFormaPago.setSiguiente(validadorVendedor);
+            validadorVendedor.setSiguiente(validadorFacturacion);
+
+            // Probar validación - debería fallar en el cliente
+            validadorCliente.validar(pedidoInvalido);
+            System.out.println("✗ Las validaciones no funcionaron correctamente - debería haber fallado");
+
+        } catch (ProcessingException e) {
+            System.out.println("✓ Chain of Responsibility - Cliente inválido detectado: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("✗ Error inesperado: " + e.getMessage());
+        }
+
+        // Test 2: Pedido con vehículo incompleto
+        try {
+            Cliente clienteValido = new Cliente("Juan", "Pérez", "12345678", "juan@test.com", "123456789");
+            Auto autoInvalido = new Auto("", "", "", "", "", 0); // Vehículo con datos vacíos
+            ConfiguracionAdicional configValida = new ConfiguracionAdicional("", "", "", 0);
+            FormaPago pagoValido = new PagoContado();
+            Vendedor vendedorValido = new Vendedor("Test Vendedor", "test@test.com");
+            DatosFacturacion facturacionValida = new DatosFacturacion("Test Cliente", "Test Dirección", "");
+
+            PedidoCompra pedidoInvalido = new PedidoCompra(clienteValido, autoInvalido, configValida, pagoValido, vendedorValido, facturacionValida);
+
             ValidadorCliente validadorCliente = new ValidadorCliente();
             ValidadorVehiculo validadorVehiculo = new ValidadorVehiculo();
             ValidadorFormaPago validadorFormaPago = new ValidadorFormaPago();
@@ -1822,14 +1902,71 @@ class TestConcesionaria {
             validadorCliente.setSiguiente(validadorVehiculo);
             validadorVehiculo.setSiguiente(validadorFormaPago);
 
-            // Probar validación
             validadorCliente.validar(pedidoInvalido);
-            validadorVehiculo.validar(pedidoInvalido);
-            validadorFormaPago.validar(pedidoInvalido);
-            System.out.println("✗ Las validaciones no funcionaron correctamente");
+            System.out.println("✗ Las validaciones no funcionaron correctamente - debería haber fallado en vehículo");
 
         } catch (ProcessingException e) {
-            System.out.println("✓ Chain of Responsibility funcionó: " + e.getMessage());
+            System.out.println("✓ Chain of Responsibility - Vehículo inválido detectado: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("✗ Error inesperado: " + e.getMessage());
+        }
+
+        // Test 3: Pedido válido que debería pasar todas las validaciones
+        try {
+            Cliente clienteValido = new Cliente("Juan", "Pérez", "12345678", "juan@test.com", "123456789");
+            Auto autoValido = new Auto("Toyota", "Corolla", "Blanco", "CH999", "MT999", 25000);
+            ConfiguracionAdicional configValida = new ConfiguracionAdicional("", "", "", 0);
+            FormaPago pagoValido = new PagoContado();
+            Vendedor vendedorValido = new Vendedor("Test Vendedor", "test@test.com");
+            DatosFacturacion facturacionValida = new DatosFacturacion("Juan Pérez", "Av. Test 123", "20-12345678-1");
+
+            PedidoCompra pedidoValido = new PedidoCompra(clienteValido, autoValido, configValida, pagoValido, vendedorValido, facturacionValida);
+
+            ValidadorCliente validadorCliente = new ValidadorCliente();
+            ValidadorVehiculo validadorVehiculo = new ValidadorVehiculo();
+            ValidadorFormaPago validadorFormaPago = new ValidadorFormaPago();
+            ValidadorVendedor validadorVendedor = new ValidadorVendedor();
+            ValidadorDatosFacturacion validadorFacturacion = new ValidadorDatosFacturacion();
+
+            validadorCliente.setSiguiente(validadorVehiculo);
+            validadorVehiculo.setSiguiente(validadorFormaPago);
+            validadorFormaPago.setSiguiente(validadorVendedor);
+            validadorVendedor.setSiguiente(validadorFacturacion);
+
+            validadorCliente.validar(pedidoValido);
+            System.out.println("✓ Chain of Responsibility - Pedido válido pasó todas las validaciones correctamente");
+
+        } catch (ProcessingException e) {
+            System.out.println("✗ Error inesperado - pedido válido falló: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("✗ Error inesperado: " + e.getMessage());
+        }
+
+        // Test 4: Validación con vendedor incompleto
+        try {
+            Cliente clienteValido = new Cliente("Juan", "Pérez", "12345678", "juan@test.com", "123456789");
+            Auto autoValido = new Auto("Toyota", "Corolla", "Blanco", "CH998", "MT998", 25000);
+            ConfiguracionAdicional configValida = new ConfiguracionAdicional("", "", "", 0);
+            FormaPago pagoValido = new PagoContado();
+            Vendedor vendedorInvalido = new Vendedor("", ""); // Vendedor con datos vacíos
+            DatosFacturacion facturacionValida = new DatosFacturacion("Test Cliente", "Test Dirección", "");
+
+            PedidoCompra pedidoInvalido = new PedidoCompra(clienteValido, autoValido, configValida, pagoValido, vendedorInvalido, facturacionValida);
+
+            ValidadorCliente validadorCliente = new ValidadorCliente();
+            ValidadorVehiculo validadorVehiculo = new ValidadorVehiculo();
+            ValidadorFormaPago validadorFormaPago = new ValidadorFormaPago();
+            ValidadorVendedor validadorVendedor = new ValidadorVendedor();
+
+            validadorCliente.setSiguiente(validadorVehiculo);
+            validadorVehiculo.setSiguiente(validadorFormaPago);
+            validadorFormaPago.setSiguiente(validadorVendedor);
+
+            validadorCliente.validar(pedidoInvalido);
+            System.out.println("✗ Las validaciones no funcionaron - debería haber fallado en vendedor");
+
+        } catch (ProcessingException e) {
+            System.out.println("✓ Chain of Responsibility - Vendedor inválido detectado: " + e.getMessage());
         } catch (Exception e) {
             System.out.println("✗ Error inesperado: " + e.getMessage());
         }
